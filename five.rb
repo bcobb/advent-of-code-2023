@@ -1,73 +1,174 @@
-class Almanac
-  def initialize(label, mappers)
+class Map
+  def initialize(label, mappings)
     @label = label
-    @mappers = mappers
+    @mappings = mappings
   end
 
-  def map(number)
-    maybe_mapped_number = @mappers
-      .filter_map do |mapper|
-        mapper.map(number)
+  attr_reader :mappings
+end
+
+class Mapping
+  include Comparable
+
+  def initialize(source_range, destination_range)
+    @source_range = source_range
+    @destination_range = destination_range
+  end
+
+  protected attr_reader(:source_range)
+
+  def mappable_range(seed_range)
+    @source_range & seed_range
+  end
+
+  def map_range(seed_range)
+    mappable_range = @source_range & seed_range
+
+    if mappable_range
+      mappable_range.map(&method(:apply))
+    end
+  end
+
+  def <=>(other)
+    source_range <=> other.source_range
+  end
+
+  def apply(seed)
+    if (seed >= @source_range.start && seed <= @source_range.stop)
+      @destination_range.start + (seed - @source_range.start)
+    end
+  end
+
+  def before
+    if @source_range.start > 0
+      range = SeedRange.new(0, @source_range.start - 1)
+
+      Mapping.new(range, range)
+    end
+  end
+
+  def after
+    range = SeedRange.new(@source_range.stop + 1, Float::INFINITY)
+
+    Mapping.new(range, range)
+  end
+end
+
+class SeedRange
+  include Comparable
+
+  def initialize(start, stop)
+    raise ArgumentError.new("start (#{start}) cannot exceed stop (#{stop})") if start > stop
+
+    @start = start
+    @stop = stop
+  end
+
+  attr_reader :start
+  attr_reader :stop
+
+  def <=>(other)
+    start_result = start <=> other.start
+
+    if start_result == 0
+      stop <=> other.stop
+    else
+      start_result
+    end
+  end
+
+  def &(other)
+    # this is either totally before or totally after the other range
+    if stop < other.start || start > other.stop
+      nil
+    else
+      if start < other.start
+        # starts before other, ends in the middle of or after other
+        # intersection is other's start until the smallest of the two possible stopping points
+        SeedRange.new(other.start, [stop, other.stop].min)
+      else
+        # starts inside other, ends in the middle of or after other
+        # intersection is this starting point until the smallest of the two possible stopping points
+        SeedRange.new(start, [stop, other.stop].min)
       end
-      .first
+    end
+  end
 
-    maybe_mapped_number || number
+  def map(&fn)
+    SeedRange.new(fn.call(start), fn.call(stop))
   end
 end
 
-class Mapper
-  def initialize(source_range_start:, destination_range_start:, range_length:)
-    @source_range_start = source_range_start
-    @destination_range_start = destination_range_start
-    @range_length = range_length
-  end
+def maps_from_input(input)
+  _, *map_inputs = input.split(/\n{2,}/)
 
-  def map(number)
-    if number >= @source_range_start && number < @source_range_start + @range_length
-      offset = number - @source_range_start
+  map_inputs.map do |map_input|
+    label, *mapping_inputs = map_input.lines.map(&:strip)
 
-      @destination_range_start + offset
+    mappings = mapping_inputs
+      .map do |mapping_input|
+        destination_range_start, source_range_start, length = mapping_input.split(" ").map(&:to_i)
+
+        Mapping.new(
+          SeedRange.new(source_range_start, source_range_start + length - 1),
+          SeedRange.new(destination_range_start, destination_range_start + length - 1)
+        )
+      end
+      .sort
+
+    if mappings.first.before
+      mappings.unshift(mappings.first.before)
     end
+
+    mappings.push(mappings.last.after)
+
+    Map.new(label.chomp(":"), mappings)
   end
 end
 
-def parse_input(input)
-  seeds_input, *mapping_inputs = input.split(/\n{2,}/)
-  seeds = seeds_input.split(": ").last.split(" ").map(&:to_i)
-  almanacs = mapping_inputs.map do |mapping_input|
-    label, *map_input = mapping_input.lines.map(&:strip)
-    mappers = map_input.map do |line|
-      destination_range_start, source_range_start, range_length = line.split(" ").map(&:to_i)
+def seeds_from_input(input)
+  seeds_input, _ = input.split(/\n{2,}/)
+  seeds_input.split(": ").last.split(" ").map(&:to_i)
+end
 
-      Mapper.new(destination_range_start: destination_range_start, source_range_start: source_range_start, range_length: range_length)
+def lowest_location_number(seed_ranges, maps)
+  current_seed_ranges = seed_ranges
+
+  maps.each do |map|
+    current_seed_ranges = map.mappings.flat_map do |mapping|
+      current_seed_ranges.filter_map do |seed_range|
+        mapping.map_range(seed_range)
+      end
     end
-
-    Almanac.new(
-      label,
-      mappers
-    )
   end
 
-  [seeds, almanacs]
+  current_seed_ranges.map(&:start).min
 end
 
 def part_one(input)
-  seeds, almanacs = parse_input(input)
+  seeds = seeds_from_input(input)
+  maps = maps_from_input(input)
 
-  seeds
-    .map do |seed|
-      position = almanacs.reduce(seed) do |position, almanac|
-        almanac.map(position)
-      end
+  seed_ranges = seeds.map { |seed| SeedRange.new(seed, seed) }
 
-      position
-    end
-    .min
+  lowest_location_number(seed_ranges, maps)
+end
+
+def part_two(input)
+  seeds = seeds_from_input(input)
+  maps = maps_from_input(input)
+
+  seed_ranges = seeds.each_slice(2).map { |start, length| SeedRange.new(start, start + length - 1) }
+
+  lowest_location_number(seed_ranges, maps)
 end
 
 def main
   puts("part one sample: #{part_one(File.read("inputs/five.sample.txt"))}")
   puts("part one: #{part_one(File.read("inputs/five.txt"))}")
+
+  puts("part two sample: #{part_two(File.read("inputs/five.sample.txt"))}")
+  puts("part two: #{part_two(File.read("inputs/five.txt"))}")
 end
 
 main if $0 == __FILE__
