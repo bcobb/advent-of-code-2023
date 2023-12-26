@@ -30,6 +30,7 @@ def parse_rules(rules_input)
               matching_range = Range.new(*[range.min, number].sort, true)
               skipping_range = Range.new(*[number, range.max].sort, false)
             end
+
           when ">"
             if number >= range.max
               matching_range = 0...0
@@ -55,7 +56,7 @@ def parse_rules(rules_input)
         sign: sign
       }
     else
-      {destination: rule_input, check_part: -> (part) { true }, check_range: -> (part) { { in: part } }}
+      {destination: rule_input, check_part: -> (part) { true }, check_range: -> (part) { {in: part} }}
     end
   end
 
@@ -108,7 +109,7 @@ def evaluate_parts(script, parts)
 end
 
 def determine_acceptable_parts(script)
-  base = %w(x m a s).to_h { |c| [c, (1..4000)]}
+  base = %w[x m a s].to_h { |c| [c, (1..4000)] }
   queue = [[base, "in"]]
   results = {}
 
